@@ -1,0 +1,9 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: SLF4J API TPCL for Northwind OMS
+Bundle-SymbolicName: com.northwind.oms.tpcl.org.slf4j;singleton:=true
+Bundle-Version: 1.0.0.qualifier
+Bundle-Vendor: Northwind
+Bundle-RequiredExecutionEnvironment: JavaSE-17
+Automatic-Module-Name: com.northwind.oms.tpcl.org.slf4j
+Export-Package: org.slf4j;version="1.0.0"

@@ -1,0 +1,4 @@
+Northwind OMS - Sample Assessment Project
+
+This material is provided solely for the purpose of evaluating candidate skills.
+It carries no warranty and is not intended for production use.

@@ -1,0 +1,12 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: Northwind OMS Shipping
+Bundle-SymbolicName: com.northwind.oms.shipping
+Bundle-Version: 1.0.0.qualifier
+Bundle-Vendor: Northwind
+Bundle-RequiredExecutionEnvironment: JavaSE-17
+Automatic-Module-Name: com.northwind.oms.shipping
+Export-Package: com.northwind.oms.shipping;version="1.0.0"
+Import-Package: com.northwind.oms.core.model;version="[1.0.0,2.0.0)",
+ com.northwind.oms.customer;version="[1.0.0,2.0.0)",
+ org.osgi.framework;version="[1.8.0,2.0.0)"

@@ -1,0 +1,11 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: Northwind OMS Security
+Bundle-SymbolicName: com.northwind.oms.security
+Bundle-Version: 1.0.0.qualifier
+Bundle-Vendor: Northwind
+Bundle-RequiredExecutionEnvironment: JavaSE-17
+Automatic-Module-Name: com.northwind.oms.security
+Export-Package: com.northwind.oms.security;version="1.0.0",
+ com.northwind.oms.security.spi;version="1.0.0"
+Import-Package: org.osgi.framework;version="[1.8.0,2.0.0)"
