@@ -11,6 +11,7 @@ Commands to run:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -19,9 +20,6 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parent
-
-# Product order is only a stable display tie-breaker. Actual ordering is
-# calculated from the dependency graph.
 PRODUCTS = [
     "catalog",
     "customer",
@@ -33,7 +31,6 @@ PRODUCTS = [
     "notification",
     "reporting",
 ]
-
 PRODUCT_INDEX = {name: i for i, name in enumerate(PRODUCTS)}
 
 
@@ -43,11 +40,8 @@ def stable_key(name: str):
 
 def run_git(args: list[str]) -> str:
     result = subprocess.run(
-        ["git", *args],
-        cwd=ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        ["git", *args], cwd=ROOT, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "Git command failed")
@@ -63,10 +57,7 @@ def git_available() -> bool:
 
 
 def parse_manifest(path: Path) -> tuple[str | None, list[str], list[str], list[str]]:
-    """Return symbolic name, exports, imports, required bundles."""
     text = path.read_text(encoding="utf-8")
-
-    # OSGi manifest continuation lines begin with whitespace.
     logical_lines: list[str] = []
     for line in text.splitlines():
         if line.startswith((" ", "\t")) and logical_lines:
@@ -82,25 +73,23 @@ def parse_manifest(path: Path) -> tuple[str | None, list[str], list[str], list[s
 
     symbolic = headers.get("Bundle-SymbolicName", "").split(";", 1)[0].strip() or None
 
-    def parse_clause_names(value: str) -> list[str]:
-        names: list[str] = []
+    def clause_names(value: str) -> list[str]:
+        result = []
         for clause in value.split(","):
-            clause = clause.strip()
-            if not clause:
-                continue
             name = clause.split(";", 1)[0].strip()
             if name:
-                names.append(name)
-        return names
+                result.append(name)
+        return result
 
-    exports = parse_clause_names(headers.get("Export-Package", ""))
-    imports = parse_clause_names(headers.get("Import-Package", ""))
-    required = parse_clause_names(headers.get("Require-Bundle", ""))
-    return symbolic, exports, imports, required
+    return (
+        symbolic,
+        clause_names(headers.get("Export-Package", "")),
+        clause_names(headers.get("Import-Package", "")),
+        clause_names(headers.get("Require-Bundle", "")),
+    )
 
 
 def parse_feature(path: Path) -> tuple[str | None, list[str], list[str]]:
-    """Return feature id, plugin IDs, required feature IDs."""
     root = ET.parse(path).getroot()
     feature_id = root.attrib.get("id")
     plugins: list[str] = []
@@ -114,8 +103,7 @@ def parse_feature(path: Path) -> tuple[str | None, list[str], list[str]]:
                 plugins.append(plugin_id)
         elif tag == "requires":
             for item in child:
-                item_tag = item.tag.rsplit("}", 1)[-1]
-                if item_tag == "import":
+                if item.tag.rsplit("}", 1)[-1] == "import":
                     feature = item.attrib.get("feature")
                     if feature:
                         required_features.append(feature)
@@ -124,12 +112,10 @@ def parse_feature(path: Path) -> tuple[str | None, list[str], list[str]]:
 
 
 def discover_products() -> dict[str, dict]:
-    """Discover the repository's product components and OSGi metadata."""
     products: dict[str, dict] = {}
-
-    for product_dir in sorted(
-        p for p in ROOT.iterdir() if p.is_dir() and (p / "pom.xml").exists()
-    ):
+    for product_dir in sorted(ROOT.iterdir()):
+        if not product_dir.is_dir() or not (product_dir / "pom.xml").exists():
+            continue
         product = product_dir.name
         if product not in PRODUCTS:
             continue
@@ -158,22 +144,13 @@ def discover_products() -> dict[str, dict]:
                     "requires": required_features,
                 }
 
-        products[product] = {
-            "path": product_dir,
-            "bundles": bundles,
-            "features": features,
-        }
-
+        products[product] = {"path": product_dir, "bundles": bundles, "features": features}
     return products
 
 
 def build_product_graph(products: dict[str, dict]) -> dict[str, set[str]]:
-    """Build product -> dependency-products graph.
-
-    graph[A] contains products that A depends on.
-    """
-    graph: dict[str, set[str]] = {p: set() for p in products}
-
+    """Return graph[product] = products required by that product."""
+    graph = {p: set() for p in products}
     bundle_to_product: dict[str, str] = {}
     package_to_products: dict[str, set[str]] = defaultdict(set)
     feature_to_product: dict[str, str] = {}
@@ -183,30 +160,25 @@ def build_product_graph(products: dict[str, dict]) -> dict[str, set[str]]:
             bundle_to_product[bundle] = product
             for package in bundle_info["exports"]:
                 package_to_products[package].add(product)
-
         for feature in info["features"]:
             feature_to_product[feature] = product
 
-    # Bundle-level dependencies.
     for product, info in products.items():
         for bundle_info in info["bundles"].values():
             for required_bundle in bundle_info["requires"]:
-                dependency_product = bundle_to_product.get(required_bundle)
-                if dependency_product and dependency_product != product:
-                    graph[product].add(dependency_product)
-
+                dependency = bundle_to_product.get(required_bundle)
+                if dependency and dependency != product:
+                    graph[product].add(dependency)
             for imported_package in bundle_info["imports"]:
-                for dependency_product in package_to_products.get(imported_package, set()):
-                    if dependency_product != product:
-                        graph[product].add(dependency_product)
+                for dependency in package_to_products.get(imported_package, set()):
+                    if dependency != product:
+                        graph[product].add(dependency)
 
-    # Feature-level dependencies.
-    for product, info in products.items():
         for feature_info in info["features"].values():
             for required_feature in feature_info["requires"]:
-                dependency_product = feature_to_product.get(required_feature)
-                if dependency_product and dependency_product != product:
-                    graph[product].add(dependency_product)
+                dependency = feature_to_product.get(required_feature)
+                if dependency and dependency != product:
+                    graph[product].add(dependency)
 
     return graph
 
@@ -220,14 +192,9 @@ def reverse_graph(graph: dict[str, set[str]]) -> dict[str, set[str]]:
 
 
 def topo_sort(graph: dict[str, set[str]], selected: set[str] | None = None) -> list[str]:
-    """Topologically sort products. graph[node] = dependencies of node."""
     nodes = set(selected if selected is not None else graph.keys())
-    indegree = {
-        node: sum(1 for dep in graph.get(node, set()) if dep in nodes)
-        for node in nodes
-    }
-
-    dependents = {node: set() for node in nodes}
+    indegree = {n: sum(1 for d in graph.get(n, set()) if d in nodes) for n in nodes}
+    dependents = {n: set() for n in nodes}
     for node in nodes:
         for dep in graph.get(node, set()):
             if dep in nodes:
@@ -235,7 +202,6 @@ def topo_sort(graph: dict[str, set[str]], selected: set[str] | None = None) -> l
 
     queue = deque(sorted((n for n in nodes if indegree[n] == 0), key=stable_key))
     order: list[str] = []
-
     while queue:
         node = queue.popleft()
         order.append(node)
@@ -246,11 +212,20 @@ def topo_sort(graph: dict[str, set[str]], selected: set[str] | None = None) -> l
 
     if len(order) != len(nodes):
         cycle_nodes = sorted(nodes - set(order), key=stable_key)
-        raise RuntimeError(
-            "Dependency cycle detected involving: " + ", ".join(cycle_nodes)
-        )
-
+        raise RuntimeError("Dependency cycle detected: " + ", ".join(cycle_nodes))
     return order
+
+
+def print_product_inventory(products: dict[str, dict]):
+    print("\n" + "=" * 72)
+    print("DISCOVERED NORTHWIND PRODUCTS")
+    print("=" * 72)
+    for product in sorted(products, key=stable_key):
+        bundles = sorted(products[product]["bundles"])
+        features = sorted(products[product]["features"])
+        print(f"\n  {product}")
+        print(f"    bundles : {', '.join(bundles) if bundles else '(none)'}")
+        print(f"    features: {', '.join(features) if features else '(none)'}")
 
 
 def print_product_graph(graph: dict[str, set[str]], selected: set[str] | None = None, title: str = "DEPENDENCY GRAPH"):
@@ -258,26 +233,22 @@ def print_product_graph(graph: dict[str, set[str]], selected: set[str] | None = 
     print("\n" + "=" * 72)
     print(title)
     print("=" * 72)
-    print("Direction: DEPENDENT  --->  DEPENDENCY")
-    print()
-
+    print("Direction: DEPENDENT -> DEPENDENCY\n")
     for product in sorted(nodes, key=stable_key):
         deps = sorted(graph.get(product, set()) & nodes, key=stable_key)
         if deps:
             for dep in deps:
-                print(f"  {product:<14} ---> {dep}")
+                print(f"  {product:<14} -> {dep}")
         else:
-            print(f"  {product:<14} ---> (none)")
+            print(f"  {product:<14} -> (none)")
 
 
 def print_dependency_paths(changed: set[str], graph: dict[str, set[str]]):
-    """Print paths from each changed product through all dependents."""
     reverse = reverse_graph(graph)
-
     print("\n" + "=" * 72)
     print("DEPENDENCY PATHS FROM CHANGED PRODUCTS")
     print("=" * 72)
-    print("Direction: CHANGED PRODUCT  --->  PRODUCT THAT MUST BE REBUILT")
+    print("Direction: CHANGED PRODUCT -> PRODUCT THAT MUST BE REBUILT")
 
     for start in sorted(changed, key=stable_key):
         print(f"\n[{start}]")
@@ -298,82 +269,45 @@ def print_dependency_paths(changed: set[str], graph: dict[str, set[str]]):
 
 
 def git_changed_files(base: str | None = None) -> list[str]:
-    """Return changed paths.
-
-    Without --base:
-      - includes staged + unstaged working-tree changes
-      - if working tree is clean, compares HEAD~1..HEAD
-
-    With --base:
-      - compares <base>..HEAD plus working-tree changes
-    """
     paths: set[str] = set()
-
     if base:
         output = run_git(["diff", "--name-only", f"{base}..HEAD"])
         paths.update(x.strip() for x in output.splitlines() if x.strip())
     else:
-        # Unstaged changes.
-        output = run_git(["diff", "--name-only"])
-        paths.update(x.strip() for x in output.splitlines() if x.strip())
-
-        # Staged changes.
-        output = run_git(["diff", "--cached", "--name-only"])
-        paths.update(x.strip() for x in output.splitlines() if x.strip())
-
-        # Untracked files.
-        output = run_git(["status", "--porcelain"])
-        for line in output.splitlines():
-            if len(line) >= 3 and line[:2] == "??":
+        paths.update(x.strip() for x in run_git(["diff", "--name-only"]).splitlines() if x.strip())
+        paths.update(x.strip() for x in run_git(["diff", "--cached", "--name-only"]).splitlines() if x.strip())
+        for line in run_git(["status", "--porcelain"]).splitlines():
+            if line.startswith("??"):
                 paths.add(line[3:].strip())
-
         if not paths:
             try:
-                output = run_git(["diff", "--name-only", "HEAD~1", "HEAD"])
-                paths.update(x.strip() for x in output.splitlines() if x.strip())
+                paths.update(x.strip() for x in run_git(["diff", "--name-only", "HEAD~1", "HEAD"]).splitlines() if x.strip())
             except RuntimeError:
-                # Repository may contain only one commit.
                 pass
-
     return sorted(paths)
 
 
-def changed_products(
-    changed_files: list[str],
-    products: dict[str, dict],
-) -> tuple[set[str], bool]:
-    """Map changed paths to products. Return (products, full_build_required)."""
+def changed_products(changed_files: list[str], products: dict[str, dict]) -> tuple[set[str], bool]:
     changed: set[str] = set()
     full_build = False
-
     product_dirs = {p: info["path"].relative_to(ROOT).as_posix() for p, info in products.items()}
 
     for raw in changed_files:
         normalized = raw.replace("\\", "/").lstrip("./")
-
-        # Root build metadata affects the whole reactor.
-        if normalized in {"pom.xml", "buildapp.py"}:
-            if normalized == "pom.xml":
-                full_build = True
+        if normalized in {"pom.xml"}:
+            full_build = True
+            continue
+        if normalized in {"README.md", "buildapp.py"}:
             continue
 
-        # A root README change is documentation only.
-        if normalized in {"README.md"}:
-            continue
-
-        # Anything under a product belongs to that product.
         matched = False
         for product, rel_dir in product_dirs.items():
             if normalized == rel_dir or normalized.startswith(rel_dir + "/"):
                 changed.add(product)
                 matched = True
                 break
-
         if not matched and normalized:
-            # Unknown repository-level build/config files are conservatively
-            # treated as full-build triggers.
             full_build = True
-
     return changed, full_build
 
 
@@ -384,80 +318,98 @@ def print_changed_files(files: list[str]):
     if not files:
         print("  No changed files detected.")
     else:
-        for f in files:
-            print(f"  - {f}")
-
-
-def print_product_inventory(products: dict[str, dict]):
-    print("\n" + "=" * 72)
-    print("DISCOVERED NORTHWIND PRODUCTS")
-    print("=" * 72)
-    for product in sorted(products, key=stable_key):
-        bundles = sorted(products[product]["bundles"])
-        features = sorted(products[product]["features"])
-        print(f"\n  {product}")
-        print(f"    bundles : {', '.join(bundles) if bundles else '(none)'}")
-        print(f"    features: {', '.join(features) if features else '(none)'}")
+        for path in files:
+            print(f"  - {path}")
 
 
 def print_build_order(order: list[str]):
     print("\n" + "=" * 72)
     print("BUILD ORDER")
     print("=" * 72)
-    for i, product in enumerate(order, 1):
-        print(f"  {i:02d}. {product}")
+    for index, product in enumerate(order, 1):
+        print(f"  {index:02d}. {product}")
     print(f"\nTotal products selected: {len(order)}")
 
 
-def build_products(order: list[str]):
+def build_products(order: list[str]) -> bool:
     print("\n" + "=" * 72)
     print("EXECUTING TYCHO BUILD")
     print("=" * 72)
-    print("Each selected product is built as a Maven reactor (-pl <product> -am).")
 
-    for i, product in enumerate(order, 1):
+    for index, product in enumerate(order, 1):
         print("\n" + "-" * 72)
-        print(f"BUILD [{i}/{len(order)}] : {product}")
+        print(f"BUILD [{index}/{len(order)}] : {product}")
         print("-" * 72)
-
-        command = [
-            "mvn",
-            "-B",
-            "-pl",
-            product,
-            "-am",
-            "clean",
-            "install",
-            "-DskipTests",
-        ]
+        command = ["mvn", "-B", "-pl", product, "-am", "clean", "install", "-DskipTests"]
         print("$ " + " ".join(command))
         result = subprocess.run(command, cwd=ROOT)
         if result.returncode != 0:
             print(f"\nERROR: Build failed for product '{product}'.")
-            sys.exit(result.returncode)
+            return False
 
     print("\n" + "=" * 72)
     print("BUILD COMPLETED SUCCESSFULLY")
     print("=" * 72)
+    return True
+
+
+def write_github_summary(mode: str, changed: set[str], selected: set[str], order: list[str], graph: dict[str, set[str]], status: str):
+    summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_file:
+        return
+
+    with open(summary_file, "a", encoding="utf-8") as f:
+        f.write("# Northwind OMS Smart Build\n\n")
+        f.write("## Build Status\n\n")
+        f.write(f"**Status:** {status}\n\n")
+        f.write(f"**Build Mode:** `{mode}`\n\n")
+
+        if mode == "changed":
+            f.write("## Changed Products\n\n")
+            if changed:
+                for product in sorted(changed, key=stable_key):
+                    f.write(f"- `{product}`\n")
+            else:
+                f.write("- None\n")
+            f.write("\n")
+
+        f.write("## Dependency Graph\n\n")
+        f.write("```text\n")
+        graph_nodes = selected if selected else set(graph)
+        for product in sorted(graph_nodes, key=stable_key):
+            deps = sorted(graph.get(product, set()) & graph_nodes, key=stable_key)
+            if deps:
+                for dep in deps:
+                    f.write(f"{product} -> {dep}\n")
+            else:
+                f.write(f"{product} -> none\n")
+        f.write("```\n\n")
+
+        if mode == "changed":
+            f.write("## Products Selected for Rebuild\n\n")
+            if selected:
+                for product in order:
+                    marker = "changed" if product in changed else "dependent"
+                    f.write(f"- `{product}` ({marker})\n")
+            else:
+                f.write("- None\n")
+            f.write("\n")
+
+        f.write("## Build Order\n\n")
+        if order:
+            for index, product in enumerate(order, 1):
+                f.write(f"{index}. `{product}`\n")
+        else:
+            f.write("No products selected.\n")
+        f.write("\n")
+        f.write(f"**Total products:** {len(order)}\n")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Northwind OMS smart OSGi/Tycho build")
-    parser.add_argument(
-        "--mode",
-        choices=["all", "changed"],
-        default="changed",
-        help="Build all products or only changed/affected products (default: changed)",
-    )
-    parser.add_argument(
-        "--build",
-        action="store_true",
-        help="Actually run Maven. Without this flag the script is a dry run.",
-    )
-    parser.add_argument(
-        "--base",
-        help="Git base revision for changed mode, e.g. main or origin/main",
-    )
+    parser.add_argument("--mode", choices=["all", "changed"], default="changed")
+    parser.add_argument("--build", action="store_true", help="Run Maven instead of dry run")
+    parser.add_argument("--base", help="Git base revision for changed mode")
     args = parser.parse_args()
 
     print("=" * 72)
@@ -467,9 +419,8 @@ def main() -> int:
     print(f"Mode       : {args.mode}")
     print(f"Execution  : {'BUILD' if args.build else 'DRY RUN'}")
 
-    if not git_available() and args.mode == "changed":
+    if args.mode == "changed" and not git_available():
         print("\nERROR: changed mode requires a Git repository.")
-        print("Run this script from a cloned Git repository.")
         return 2
 
     products = discover_products()
@@ -478,24 +429,23 @@ def main() -> int:
         print("\nWARNING: Expected products not found: " + ", ".join(missing))
 
     print_product_inventory(products)
-
     graph = build_product_graph(products)
-    print_product_graph(graph, title="FULL PRODUCT DEPENDENCY GRAPH")
 
     if args.mode == "all":
         selected = set(products)
         order = topo_sort(graph, selected)
+        print_product_graph(graph, selected, "FULL PRODUCT DEPENDENCY GRAPH")
         print_build_order(order)
-
+        status = "DRY RUN"
         if args.build:
-            build_products(order)
+            status = "SUCCESS" if build_products(order) else "FAILED"
         else:
             print("\nDRY RUN: Maven was not executed. Add --build to execute it.")
-        return 0
+        write_github_summary(args.mode, set(), selected, order, graph, status)
+        return 0 if status != "FAILED" else 1
 
     changed_files = git_changed_files(args.base)
     print_changed_files(changed_files)
-
     changed, full_build = changed_products(changed_files, products)
 
     if full_build:
@@ -505,15 +455,18 @@ def main() -> int:
         order = topo_sort(graph, selected)
         print_product_graph(graph, selected, "FULL BUILD GRAPH (REQUIRED)")
         print_build_order(order)
+        status = "DRY RUN"
         if args.build:
-            build_products(order)
+            status = "SUCCESS" if build_products(order) else "FAILED"
         else:
             print("\nDRY RUN: Maven was not executed. Add --build to execute it.")
-        return 0
+        write_github_summary(args.mode, changed, selected, order, graph, status)
+        return 0 if status != "FAILED" else 1
 
     if not changed:
-        print("\nNo product source/feature/plugin changes detected.")
+        print("\nNo product source, feature, or plugin changes detected.")
         print("Nothing needs to be rebuilt.")
+        write_github_summary(args.mode, set(), set(), [], graph, "NO CHANGES")
         return 0
 
     print("\n" + "=" * 72)
@@ -525,7 +478,6 @@ def main() -> int:
     reverse = reverse_graph(graph)
     selected = set(changed)
     queue = deque(sorted(changed, key=stable_key))
-
     while queue:
         current = queue.popleft()
         for dependent in sorted(reverse.get(current, set()), key=stable_key):
@@ -541,17 +493,18 @@ def main() -> int:
         print(f"  [{marker:<9}] {product}")
 
     print_dependency_paths(changed, graph)
-    print_product_graph(graph, selected, "CHANGED-MODULES PRODUCT DEPENDENCY GRAPH")
-
+    print_product_graph(graph, selected, "CHANGED PRODUCTS DEPENDENCY GRAPH")
     order = topo_sort(graph, selected)
     print_build_order(order)
 
+    status = "DRY RUN"
     if args.build:
-        build_products(order)
+        status = "SUCCESS" if build_products(order) else "FAILED"
     else:
         print("\nDRY RUN: Maven was not executed. Add --build to execute it.")
 
-    return 0
+    write_github_summary(args.mode, changed, selected, order, graph, status)
+    return 0 if status != "FAILED" else 1
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-name: Northwind Smart Build
+name: Northwind OMS Smart Build
 
 on:
   push:
@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       build_mode:
-        description: "Build mode"
+        description: Build mode
         required: true
-        default: "changed"
+        default: changed
         type: choice
         options:
           - changed
@@ -27,75 +27,25 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Setup Java
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
-          java-version: "17"
-          distribution: "temurin"
+          distribution: temurin
+          java-version: '17'
+          cache: maven
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: '3.x'
+
+      - name: Make build script executable
+        run: chmod +x buildapp.py
 
       - name: Run Smart Build
-        id: smart-build
-        continue-on-error: true
         run: |
-          touch build-output.txt
-
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            python buildapp.py --mode "${{ inputs.build_mode }}" --build 2>&1 | tee build-output.txt
+            python buildapp.py --mode "${{ inputs.build_mode }}" --build
           else
-            python buildapp.py --mode changed --build 2>&1 | tee build-output.txt
+            python buildapp.py --mode changed --build
           fi
-
-          BUILD_EXIT_CODE=${PIPESTATUS[0]}
-
-          echo "exit_code=$BUILD_EXIT_CODE" >> "$GITHUB_OUTPUT"
-
-          exit $BUILD_EXIT_CODE
-
-      - name: Generate Build Summary
-        if: always()
-        run: |
-          echo "# Northwind OMS Smart Build" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "## Build Information" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "| Property | Value |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Branch | ${{ github.ref_name }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Commit | ${{ github.sha }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Trigger | ${{ github.event_name }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Build Mode | ${{ inputs.build_mode || 'changed' }} |" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          if [ "${{ steps.smart-build.outputs.exit_code }}" = "0" ]; then
-            echo "## Build Status: SUCCESS" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "## Build Status: FAILED" >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "## Build Output" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          echo '```text' >> "$GITHUB_STEP_SUMMARY"
-
-          if [ -f build-output.txt ]; then
-            cat build-output.txt >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "No build output was generated." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Fail workflow if build failed
-        if: steps.smart-build.outputs.exit_code != '0'
-        run: |
-          echo "Smart build failed."
-          exit 1
