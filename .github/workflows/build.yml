@@ -1,0 +1,46 @@
+name: Northwind Smart Build
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+    inputs:
+      build_mode:
+        description: "Build mode"
+        required: true
+        default: "changed"
+        type: choice
+        options:
+          - changed
+          - all
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Run Build
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            python buildapp.py --mode ${{ inputs.build_mode }} --build
+          else
+            python buildapp.py --mode changed --build
+          fi
