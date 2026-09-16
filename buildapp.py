@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Commands to run:
+Commands to run in local:
   python buildapp.py --mode all
   python buildapp.py --mode all --build
   python buildapp.py --mode changed
@@ -353,6 +353,27 @@ def build_products(order: list[str]) -> bool:
     return True
 
 
+def collect_build_artifacts(selected: set[str]) -> list[tuple[str, int]]:
+    artifacts: list[tuple[str, int]] = []
+    extensions = {".jar", ".zip", ".war", ".ear", ".xml"}
+
+    for product in sorted(selected, key=stable_key):
+        product_dir = ROOT / product
+        target_dir = product_dir / "target"
+        if not target_dir.exists():
+            continue
+
+        for artifact in target_dir.rglob("*"):
+            if not artifact.is_file():
+                continue
+            if artifact.suffix.lower() not in extensions:
+                continue
+            relative = artifact.relative_to(ROOT).as_posix()
+            artifacts.append((relative, artifact.stat().st_size))
+
+    return sorted(artifacts)
+
+
 def write_github_summary(mode: str, changed: set[str], selected: set[str], order: list[str], graph: dict[str, set[str]], status: str):
     summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
     if not summary_file:
@@ -374,16 +395,36 @@ def write_github_summary(mode: str, changed: set[str], selected: set[str], order
             f.write("\n")
 
         f.write("## Dependency Graph\n\n")
-        f.write("```text\n")
+        f.write("```mermaid\n")
+        f.write("flowchart LR\n")
         graph_nodes = selected if selected else set(graph)
         for product in sorted(graph_nodes, key=stable_key):
+            safe_product = re.sub(r"[^A-Za-z0-9_]", "_", product)
+            f.write(f"    {safe_product}[{product}]\n")
+        for product in sorted(graph_nodes, key=stable_key):
             deps = sorted(graph.get(product, set()) & graph_nodes, key=stable_key)
-            if deps:
-                for dep in deps:
-                    f.write(f"{product} -> {dep}\n")
-            else:
-                f.write(f"{product} -> none\n")
+            for dep in deps:
+                safe_product = re.sub(r"[^A-Za-z0-9_]", "_", product)
+                safe_dep = re.sub(r"[^A-Za-z0-9_]", "_", dep)
+                f.write(f"    {safe_product} --> {safe_dep}\n")
         f.write("```\n\n")
+
+        f.write("## Artifacts\n\n")
+        artifacts = collect_build_artifacts(selected)
+        if artifacts:
+            f.write("| Artifact | Size |\n")
+            f.write("|---|---:|\n")
+            for artifact, size in artifacts:
+                if size >= 1024 * 1024:
+                    display_size = f"{size / (1024 * 1024):.2f} MB"
+                elif size >= 1024:
+                    display_size = f"{size / 1024:.1f} KB"
+                else:
+                    display_size = f"{size} B"
+                f.write(f"| `{artifact}` | {display_size} |\n")
+        else:
+            f.write("No build artifacts found.\n")
+        f.write("\n")
 
         if mode == "changed":
             f.write("## Products Selected for Rebuild\n\n")
