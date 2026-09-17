@@ -355,21 +355,24 @@ def build_products(order: list[str]) -> bool:
 
 def collect_build_artifacts(selected: set[str]) -> list[tuple[str, int]]:
     artifacts: list[tuple[str, int]] = []
-    extensions = {".jar", ".zip", ".war", ".ear", ".xml"}
+    extensions = {".jar", ".zip", ".war", ".ear"}
 
     for product in sorted(selected, key=stable_key):
         product_dir = ROOT / product
-        target_dir = product_dir / "target"
-        if not target_dir.exists():
-            continue
 
-        for artifact in target_dir.rglob("*"):
-            if not artifact.is_file():
+        for target_dir in product_dir.rglob("target"):
+            if not target_dir.is_dir():
                 continue
-            if artifact.suffix.lower() not in extensions:
-                continue
-            relative = artifact.relative_to(ROOT).as_posix()
-            artifacts.append((relative, artifact.stat().st_size))
+
+            for artifact in target_dir.iterdir():
+                if not artifact.is_file():
+                    continue
+
+                if artifact.suffix.lower() not in extensions:
+                    continue
+
+                relative = artifact.relative_to(ROOT).as_posix()
+                artifacts.append((relative, artifact.stat().st_size))
 
     return sorted(artifacts)
 
@@ -394,7 +397,7 @@ def write_github_summary(mode: str, changed: set[str], selected: set[str], order
                 f.write("- None\n")
             f.write("\n")
 
-        f.write("## Dependency Graph\n\n")
+        f.write("## OSGi Dependency Graph\n\n")
         f.write("```mermaid\n")
         f.write("flowchart LR\n")
         graph_nodes = selected if selected else set(graph)
