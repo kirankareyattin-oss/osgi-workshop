@@ -1,35 +1,15 @@
 #!/usr/bin/env python3
-"""
-Commands to run in local:
-  python buildapp.py --mode all
-  python buildapp.py --mode all --build
-  python buildapp.py --mode changed
-  python buildapp.py --mode changed --build
-  python buildapp.py --mode changed --base main
-"""
-
 from __future__ import annotations
 import argparse
 import os
 import re
 import subprocess
-import sys
 from collections import defaultdict, deque
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parent
-PRODUCTS = [
-    "catalog",
-    "customer",
-    "security",
-    "thirdparty",
-    "orders",
-    "payment",
-    "shipping",
-    "notification",
-    "reporting",
-]
+PRODUCTS = ["catalog", "customer", "security", "thirdparty", "orders", "payment", "shipping", "notification", "reporting"]
 PRODUCT_INDEX = {name: i for i, name in enumerate(PRODUCTS)}
 
 def stable_key(name: str):
@@ -289,20 +269,35 @@ def build_products(order: list[str]) -> bool:
     print("\n" + "=" * 72)
     print("EXECUTING TYCHO BUILD")
     print("=" * 72)
+    mvn_check = subprocess.run(["mvn", "-version"], cwd=ROOT, text=True)
+    if mvn_check.returncode != 0:
+        print("\nERROR: Maven is not available on PATH.")
+        return False
     for index, product in enumerate(order, 1):
         print("\n" + "-" * 72)
         print(f"BUILD [{index}/{len(order)}] : {product}")
         print("-" * 72)
         pom_path = ROOT / product / "pom.xml"
         if not pom_path.exists():
-            print(f"\nERROR: POM not found for product '{product}': {pom_path}")
+            print(f"ERROR: POM not found for product '{product}': {pom_path}")
             return False
         command = ["mvn", "-B", "-f", f"{product}/pom.xml", "clean", "install", "-DskipTests"]
+        print("Working directory:", ROOT)
+        print("POM:", pom_path)
         print("$ " + " ".join(command))
-        result = subprocess.run(command, cwd=ROOT)
+        result = subprocess.run(command, cwd=ROOT, text=True)
+        print(f"Maven exit code for {product}: {result.returncode}")
         if result.returncode != 0:
             print(f"\nERROR: Build failed for product '{product}'.")
             return False
+        print(f"BUILD SUCCESS: {product}")
+        targets = list((ROOT / product).rglob("target"))
+        if targets:
+            print("Target directories created:")
+            for target in targets:
+                print("  " + target.relative_to(ROOT).as_posix())
+        else:
+            print(f"WARNING: Maven succeeded but no target directory was found under {product}")
     print("\n" + "=" * 72)
     print("BUILD COMPLETED SUCCESSFULLY")
     print("=" * 72)
@@ -311,20 +306,14 @@ def build_products(order: list[str]) -> bool:
 def collect_build_artifacts(selected: set[str] | None = None) -> list[tuple[str, int]]:
     artifacts = []
     extensions = {".jar", ".zip", ".war", ".ear"}
-    selected_prefixes = set()
-    if selected:
-        selected_prefixes = {f"{product}/" for product in selected}
+    selected_prefixes = {f"{product}/" for product in selected} if selected else set()
     for artifact in ROOT.rglob("*"):
-        if not artifact.is_file():
-            continue
-        if artifact.suffix.lower() not in extensions:
+        if not artifact.is_file() or artifact.suffix.lower() not in extensions:
             continue
         relative = artifact.relative_to(ROOT).as_posix()
-        if not any(part == "target" for part in artifact.parts):
+        if ".git/" in relative or "target" not in artifact.parts:
             continue
         if selected_prefixes and not any(relative.startswith(prefix) for prefix in selected_prefixes):
-            continue
-        if ".git/" in relative:
             continue
         artifacts.append((relative, artifact.stat().st_size))
     return sorted(set(artifacts))
@@ -368,11 +357,9 @@ def write_github_summary(mode: str, changed: set[str], selected: set[str], order
             f.write("\n")
         f.write("## OSGi Product Dependency Graph\n\n")
         f.write("**Graph direction:** `A --> B` means **B depends on A**.\n\n")
-        f.write("The graph contains all discovered product modules. In changed mode, changed products are marked `CHANGED` and impacted products are marked `REBUILD`.\n\n")
         write_mermaid_graph(f, graph, changed, selected)
         if mode == "changed" and changed:
             f.write("## Dependency Paths for Changed Products\n\n")
-            f.write("Each path shows the impact of a changed product through products that depend on it.\n\n")
             paths_by_product = get_dependency_paths(changed, graph)
             for start in sorted(changed, key=stable_key):
                 f.write(f"### `{start}`\n\n")
@@ -393,7 +380,7 @@ def write_github_summary(mode: str, changed: set[str], selected: set[str], order
                 f.write("- None\n")
             f.write("\n")
         f.write("## Artifacts\n\n")
-        artifacts = collect_build_artifacts(selected)
+        artifacts = collect_build_artifacts()
         if artifacts:
             f.write("| Artifact | Size |\n|---|---:|\n")
             for artifact, size in artifacts:
