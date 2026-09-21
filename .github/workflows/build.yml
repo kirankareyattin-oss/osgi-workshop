@@ -28,7 +28,7 @@ jobs:
           fetch-depth: 2
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -56,6 +56,6 @@ jobs:
         with:
           name: northwind-oms-artifacts
           path: |
-            osgi-workshop/**/target/*.jar
-            osgi-workshop/**/target/*.zip
+            **/target/*.jar
+            **/target/*.zip
           if-no-files-found: warn

@@ -372,7 +372,9 @@ def collect_build_artifacts(selected: set[str]) -> list[tuple[str, int]]:
                     continue
 
                 relative = artifact.relative_to(ROOT).as_posix()
-                artifacts.append((relative, artifact.stat().st_size))
+                artifacts.append(
+                    (relative, artifact.stat().st_size)
+                )
 
     return sorted(artifacts)
 
