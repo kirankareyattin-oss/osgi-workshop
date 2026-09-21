@@ -50,6 +50,26 @@ jobs:
             python buildapp.py --mode changed --build
           fi
 
+      - name: Debug Maven outputs
+        if: always()
+        run: |
+          echo "========================================"
+          echo "TARGET DIRECTORIES"
+          echo "========================================"
+          find . -type d -name target -print
+
+          echo ""
+          echo "========================================"
+          echo "ALL FILES INSIDE TARGET DIRECTORIES"
+          echo "========================================"
+          find . -type f -path "*/target/*" -print
+
+          echo ""
+          echo "========================================"
+          echo "JAR / ZIP FILES"
+          echo "========================================"
+          find . -type f \( -name "*.jar" -o -name "*.zip" \) -print
+
       - name: Upload Build Artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -59,9 +79,3 @@ jobs:
             **/target/*.jar
             **/target/*.zip
           if-no-files-found: warn
-      
-      - name: Debug generated artifacts
-        if: always()
-        run: |
-          echo "Generated JAR/ZIP files:"
-          find . -type f \( -name "*.jar" -o -name "*.zip" \) -print
