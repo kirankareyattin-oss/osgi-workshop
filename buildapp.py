@@ -311,25 +311,23 @@ def build_products(order: list[str]) -> bool:
 def collect_build_artifacts(selected: set[str] | None = None) -> list[tuple[str, int]]:
     artifacts = []
     extensions = {".jar", ".zip", ".war", ".ear"}
-    search_roots = []
+    selected_prefixes = set()
     if selected:
-        for product in sorted(selected, key=stable_key):
-            product_dir = ROOT / product
-            if product_dir.exists():
-                search_roots.append(product_dir)
-    else:
-        search_roots.append(ROOT)
-    seen = set()
-    for search_root in search_roots:
-        for artifact in search_root.rglob("*"):
-            if not artifact.is_file() or artifact.suffix.lower() not in extensions or "target" not in artifact.parts:
-                continue
-            relative = artifact.relative_to(ROOT).as_posix()
-            if relative in seen:
-                continue
-            seen.add(relative)
-            artifacts.append((relative, artifact.stat().st_size))
-    return sorted(artifacts)
+        selected_prefixes = {f"{product}/" for product in selected}
+    for artifact in ROOT.rglob("*"):
+        if not artifact.is_file():
+            continue
+        if artifact.suffix.lower() not in extensions:
+            continue
+        relative = artifact.relative_to(ROOT).as_posix()
+        if not any(part == "target" for part in artifact.parts):
+            continue
+        if selected_prefixes and not any(relative.startswith(prefix) for prefix in selected_prefixes):
+            continue
+        if ".git/" in relative:
+            continue
+        artifacts.append((relative, artifact.stat().st_size))
+    return sorted(set(artifacts))
 
 def safe_mermaid_id(product: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]", "_", product)

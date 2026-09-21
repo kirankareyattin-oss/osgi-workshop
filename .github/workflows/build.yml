@@ -21,10 +21,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    # defaults:
-    #   run:
-    #     working-directory: osgi-workshop
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -48,27 +44,34 @@ jobs:
 
       - name: Verify workspace
         run: |
-          echo "Current directory:"
+          echo "========================================"
+          echo "WORKSPACE"
+          echo "========================================"
           pwd
-
-          echo ""
-          echo "Root files:"
           ls -la
 
           echo ""
-          echo "POM locations:"
+          echo "========================================"
+          echo "POM FILES"
+          echo "========================================"
           find . -name pom.xml -print
 
           echo ""
-          echo "buildapp.py locations:"
+          echo "========================================"
+          echo "BUILD SCRIPT"
+          echo "========================================"
           find . -name buildapp.py -print
 
       - name: Run Smart Build
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            python buildapp.py --mode "${{ inputs.build_mode }}" --build
+            python buildapp.py \
+              --mode "${{ inputs.build_mode }}" \
+              --build
           else
-            python buildapp.py --mode all --build
+            python buildapp.py \
+              --mode all \
+              --build
           fi
 
       - name: Debug Maven outputs
@@ -87,37 +90,52 @@ jobs:
 
           echo ""
           echo "========================================"
-          echo "JAR / ZIP FILES"
+          echo "JAR / ZIP / WAR / EAR FILES"
           echo "========================================"
-          find . -type f \
-            \( -name "*.jar" -o -name "*.zip" -o -name "*.war" -o -name "*.ear" \) \
-            -path "*/target/*" \
-            -print
+          find . -type f \( \
+            -name "*.jar" -o \
+            -name "*.zip" -o \
+            -name "*.war" -o \
+            -name "*.ear" \
+          \) -print
 
-      - name: Add artifacts to job summary
+      - name: Verify build artifacts
         if: always()
         run: |
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "## Build Artifacts" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "========================================"
+          echo "BUILD ARTIFACT VERIFICATION"
+          echo "========================================"
 
-          mapfile -t ARTIFACTS < <(
-            find . -type f \
-              \( -name "*.jar" -o -name "*.zip" -o -name "*.war" -o -name "*.ear" \) \
-              -path "*/target/*" \
-              -print | sort
-          )
+          ARTIFACT_COUNT=$(find . -type f \( \
+            -name "*.jar" -o \
+            -name "*.zip" -o \
+            -name "*.war" -o \
+            -name "*.ear" \
+          \) | wc -l)
 
-          if [ "${#ARTIFACTS[@]}" -eq 0 ]; then
-            echo "No build artifacts found." >> "$GITHUB_STEP_SUMMARY"
+          echo "Artifact count: ${ARTIFACT_COUNT}"
+
+          if [ "${ARTIFACT_COUNT}" -eq 0 ]; then
+            echo "WARNING: No Maven artifacts were found."
           else
-            echo "| Artifact | Size |" >> "$GITHUB_STEP_SUMMARY"
-            echo "|---|---:|" >> "$GITHUB_STEP_SUMMARY"
-
-            for file in "${ARTIFACTS[@]}"; do
-              size=$(du -h "$file" | cut -f1)
-              echo "| \`$file\` | $size |" >> "$GITHUB_STEP_SUMMARY"
-            done
+            echo "Build artifacts found:"
+            find . -type f \( \
+              -name "*.jar" -o \
+              -name "*.zip" -o \
+              -name "*.war" -o \
+              -name "*.ear" \
+            \) -print
           fi
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Build Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: northwind-oms-artifacts
+          path: |
+            **/target/*.jar
+            **/target/*.zip
+            **/target/*.war
+            **/target/*.ear
+          if-no-files-found: warn
+          retention-days: 7
