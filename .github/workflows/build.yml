@@ -21,6 +21,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: osgi-workshop
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -42,12 +46,29 @@ jobs:
       - name: Make build script executable
         run: chmod +x buildapp.py
 
+      - name: Verify workspace
+        run: |
+          echo "Current directory:"
+          pwd
+
+          echo ""
+          echo "Root files:"
+          ls -la
+
+          echo ""
+          echo "POM locations:"
+          find . -name pom.xml -print
+
+          echo ""
+          echo "buildapp.py locations:"
+          find . -name buildapp.py -print
+
       - name: Run Smart Build
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             python buildapp.py --mode "${{ inputs.build_mode }}" --build
           else
-            python buildapp.py --mode changed --build
+            python buildapp.py --mode all --build
           fi
 
       - name: Debug Maven outputs
