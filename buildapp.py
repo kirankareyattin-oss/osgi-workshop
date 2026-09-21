@@ -340,7 +340,12 @@ def build_products(order: list[str]) -> bool:
         print("\n" + "-" * 72)
         print(f"BUILD [{index}/{len(order)}] : {product}")
         print("-" * 72)
-        command = ["mvn", "-B", "-pl", product, "-am", "clean", "install", "-DskipTests"]
+        command = [
+            "mvn", "-B",
+            "-f", f"{product}/pom.xml",
+            "clean", "install",
+            "-DskipTests"
+        ]
         print("$ " + " ".join(command))
         result = subprocess.run(command, cwd=ROOT)
         if result.returncode != 0:
