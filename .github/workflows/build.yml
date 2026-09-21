@@ -21,9 +21,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: osgi-workshop
+    # defaults:
+    #   run:
+    #     working-directory: osgi-workshop
 
     steps:
       - name: Checkout code
