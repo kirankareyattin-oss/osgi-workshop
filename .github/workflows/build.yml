@@ -59,3 +59,9 @@ jobs:
             **/target/*.jar
             **/target/*.zip
           if-no-files-found: warn
+      
+      - name: Debug generated artifacts
+        if: always()
+        run: |
+          echo "Generated JAR/ZIP files:"
+          find . -type f \( -name "*.jar" -o -name "*.zip" \) -print
