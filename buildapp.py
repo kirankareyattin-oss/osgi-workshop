@@ -353,28 +353,43 @@ def build_products(order: list[str]) -> bool:
     return True
 
 
-def collect_build_artifacts(selected: set[str]) -> list[tuple[str, int]]:
+def collect_build_artifacts(selected: set[str] | None = None) -> list[tuple[str, int]]:
     artifacts: list[tuple[str, int]] = []
     extensions = {".jar", ".zip", ".war", ".ear"}
 
-    for product in sorted(selected, key=stable_key):
-        product_dir = ROOT / product
+    search_roots = []
 
-        for target_dir in product_dir.rglob("target"):
-            if not target_dir.is_dir():
+    if selected:
+        for product in sorted(selected, key=stable_key):
+            product_dir = ROOT / product
+            if product_dir.exists():
+                search_roots.append(product_dir)
+    else:
+        search_roots.append(ROOT)
+
+    seen: set[str] = set()
+
+    for search_root in search_roots:
+        for artifact in search_root.rglob("*"):
+            if not artifact.is_file():
                 continue
 
-            for artifact in target_dir.iterdir():
-                if not artifact.is_file():
-                    continue
+            if artifact.suffix.lower() not in extensions:
+                continue
 
-                if artifact.suffix.lower() not in extensions:
-                    continue
+            if "target" not in artifact.parts:
+                continue
 
-                relative = artifact.relative_to(ROOT).as_posix()
-                artifacts.append(
-                    (relative, artifact.stat().st_size)
-                )
+            relative = artifact.relative_to(ROOT).as_posix()
+
+            if relative in seen:
+                continue
+
+            seen.add(relative)
+
+            artifacts.append(
+                (relative, artifact.stat().st_size)
+            )
 
     return sorted(artifacts)
 

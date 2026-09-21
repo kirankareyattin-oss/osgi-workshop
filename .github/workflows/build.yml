@@ -89,7 +89,38 @@ jobs:
           echo "========================================"
           echo "JAR / ZIP FILES"
           echo "========================================"
-          find . -type f \( -name "*.jar" -o -name "*.zip" \) -print
+          find . -type f \
+            \( -name "*.jar" -o -name "*.zip" -o -name "*.war" -o -name "*.ear" \) \
+            -path "*/target/*" \
+            -print
+
+      - name: Add artifacts to job summary
+        if: always()
+        run: |
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Build Artifacts" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          mapfile -t ARTIFACTS < <(
+            find . -type f \
+              \( -name "*.jar" -o -name "*.zip" -o -name "*.war" -o -name "*.ear" \) \
+              -path "*/target/*" \
+              -print | sort
+          )
+
+          if [ "${#ARTIFACTS[@]}" -eq 0 ]; then
+            echo "No build artifacts found." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| Artifact | Size |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|---|---:|" >> "$GITHUB_STEP_SUMMARY"
+
+            for file in "${ARTIFACTS[@]}"; do
+              size=$(du -h "$file" | cut -f1)
+              echo "| \`$file\` | $size |" >> "$GITHUB_STEP_SUMMARY"
+            done
+          fi
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Build Artifacts
         if: always()
@@ -99,4 +130,6 @@ jobs:
           path: |
             **/target/*.jar
             **/target/*.zip
+            **/target/*.war
+            **/target/*.ear
           if-no-files-found: warn
