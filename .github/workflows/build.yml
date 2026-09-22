@@ -1,11 +1,10 @@
-name: Northwind OMS Smart Build
+name: Northwind OMS Smart OSGi Build
 
 on:
   push:
     branches:
       - main
       - develop
-
   workflow_dispatch:
     inputs:
       build_mode:
@@ -20,7 +19,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -41,145 +39,63 @@ jobs:
 
       - name: Verify Java and Maven
         run: |
-          echo "========================================"
-          echo "JAVA VERSION"
-          echo "========================================"
           java -version
-
-          echo ""
-          echo "========================================"
-          echo "MAVEN VERSION"
-          echo "========================================"
           mvn -version
-
-          echo ""
-          echo "MAVEN LOCATION"
-          echo "========================================"
           which mvn
 
-      - name: Verify workspace
+      - name: Verify OSGi files
         run: |
-          echo "========================================"
-          echo "WORKSPACE"
-          echo "========================================"
-          pwd
-          ls -la
-
+          echo "OSGi MANIFEST files:"
+          find . -path "./.git" -prune -o -name MANIFEST.MF -print
           echo ""
-          echo "========================================"
-          echo "POM FILES"
-          echo "========================================"
-          find . -name pom.xml -print
-
+          echo "OSGi feature files:"
+          find . -path "./.git" -prune -o -name feature.xml -print
           echo ""
-          echo "========================================"
-          echo "BUILD SCRIPT"
-          echo "========================================"
           ls -l buildapp.py
 
-      - name: Run Smart Build
+      - name: Run Smart OSGi Build
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            python buildapp.py \
-              --mode "${{ inputs.build_mode }}" \
-              --build
+            python buildapp.py --mode "${{ inputs.build_mode }}" --build
           else
-            python buildapp.py \
-              --mode all \
-              --build
+            python buildapp.py --mode changed --build
           fi
 
-      - name: Debug Maven outputs
+      - name: Debug Build Outputs
         if: always()
         run: |
-          echo "========================================"
           echo "TARGET DIRECTORIES"
-          echo "========================================"
-
-          find . -type d -name target -print
-
+          find . -path "./.git" -prune -o -type d -name target -print
           echo ""
-          echo "========================================"
-          echo "ALL FILES INSIDE TARGET DIRECTORIES"
-          echo "========================================"
-
-          find . -type f -path "*/target/*" -print
-
+          echo "FILES INSIDE TARGET DIRECTORIES"
+          find . -path "./.git" -prune -o -type f -path "*/target/*" -print
           echo ""
-          echo "========================================"
-          echo "JAR / ZIP / WAR / EAR FILES"
-          echo "========================================"
-
-          find . -type f \( \
-            -name "*.jar" -o \
-            -name "*.zip" -o \
-            -name "*.war" -o \
-            -name "*.ear" \
-          \) -print
+          echo "OSGi BUILD ARTIFACTS"
+          find . -path "./.git" -prune -o -type f \( -name "*.jar" -o -name "*.zip" -o -name "*.war" -o -name "*.ear" \) -print
 
       - name: Collect Build Artifacts
         if: always()
         run: |
-          echo "========================================"
-          echo "COLLECTING BUILD ARTIFACTS"
-          echo "========================================"
-
           rm -rf artifact-output
           mkdir -p artifact-output
+          find . -path "./.git" -prune -o -type f -path "*/target/*" \( -name "*.jar" -o -name "*.zip" -o -name "*.war" -o -name "*.ear" \) -exec cp --parents {} artifact-output/ \;
+          echo "Collected artifacts:"
+          find artifact-output -type f -print
 
-          find . -type f \
-            -path "*/target/*" \
-            \( \
-              -name "*.jar" -o \
-              -name "*.zip" -o \
-              -name "*.war" -o \
-              -name "*.ear" \
-            \) \
-            -not -path "./.git/*" \
-            -exec cp --parents {} artifact-output/ \;
-
-          echo ""
-          echo "========================================"
-          echo "COLLECTED ARTIFACTS"
-          echo "========================================"
-
-          if find artifact-output -type f | grep -q .; then
-            find artifact-output -type f -print
-          else
-            echo "No build artifacts collected."
-          fi
-
-      - name: Verify build artifacts
+      - name: Verify Build Artifacts
         if: always()
         run: |
-          echo "========================================"
-          echo "BUILD ARTIFACT VERIFICATION"
-          echo "========================================"
-
-          ARTIFACT_COUNT=$(find artifact-output \
-            -type f \
-            \( \
-              -name "*.jar" -o \
-              -name "*.zip" -o \
-              -name "*.war" -o \
-              -name "*.ear" \
-            \) | wc -l)
-
+          ARTIFACT_COUNT=$(find artifact-output -type f \( -name "*.jar" -o -name "*.zip" -o -name "*.war" -o -name "*.ear" \) | wc -l)
           echo "Artifact count: ${ARTIFACT_COUNT}"
-
           if [ "${ARTIFACT_COUNT}" -eq 0 ]; then
-            echo "WARNING: No Maven artifacts were found."
-          else
-            echo ""
-            echo "Build artifacts found:"
-            find artifact-output -type f -print
+            echo "WARNING: No OSGi build artifacts were found."
           fi
 
       - name: Upload Build Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: northwind-oms-artifacts
+          name: northwind-oms-osgi-artifacts
           path: artifact-output
           if-no-files-found: warn
           retention-days: 7
